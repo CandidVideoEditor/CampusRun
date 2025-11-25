@@ -1,7 +1,6 @@
 import pygame
-import asyncio # Crucial for Web support
+import asyncio
 import random
-import math
 
 # --- CONFIGURATION ---
 WIDTH, HEIGHT = 800, 600
@@ -10,16 +9,17 @@ FPS = 60
 # COLORS
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GREEN = (50, 205, 50) # Notes
-RED = (200, 0, 0)     # HOD
-BLUE = (0, 0, 200)    # Boy
-PINK = (255, 105, 180)# Girl
-BROWN = (139, 69, 19) # Obstacles
-GOLD = (255, 215, 0)  # Gate
+GREEN = (50, 205, 50)  # Notes
+RED = (200, 0, 0)      # HOD / Enemy
+BLUE = (0, 0, 200)     # Boy
+PINK = (255, 105, 180) # Girl
+BROWN = (139, 69, 19)  # Obstacles
+GOLD = (255, 215, 0)   # Gate
+FLOOR = (30, 30, 30)   # Dark Grey Floor
 
 # --- ASSET LOADER ---
-# This function loads an image if it exists, otherwise returns a colored surface
 def load_asset(filename, color, size):
+    """Loads image if exists, else returns colored square."""
     try:
         path = f"assets/{filename}"
         img = pygame.image.load(path)
@@ -30,19 +30,18 @@ def load_asset(filename, color, size):
         return surf
 
 # --- CLASSES ---
-
 class Player(pygame.sprite.Sprite):
     def __init__(self, gender, x, y):
         super().__init__()
         self.gender = gender
-        self.original_speed = 5
-        self.speed = self.original_speed
+        self.base_speed = 5
+        self.speed = self.base_speed
         
-        # Load Sprite based on Gender
+        # Gender Selection
         if gender == 'Male':
-            self.image = load_asset("boy.png", BLUE, (40, 40))
+            self.image = load_asset("boy.png", BLUE, (30, 30))
         else:
-            self.image = load_asset("girl.png", PINK, (40, 40))
+            self.image = load_asset("girl.png", PINK, (30, 30))
             
         self.rect = self.image.get_rect()
         self.rect.topleft = (x, y)
@@ -56,49 +55,49 @@ class Player(pygame.sprite.Sprite):
         if keys[pygame.K_UP] or keys[pygame.K_w]: dy = -self.speed
         if keys[pygame.K_DOWN] or keys[pygame.K_s]: dy = self.speed
 
-        # Move and check wall collisions
+        # Move X
         self.rect.x += dx
         if pygame.sprite.spritecollide(self, walls, False):
-            self.rect.x -= dx # Undo move
+            self.rect.x -= dx # Undo move if hit wall
         
+        # Move Y
         self.rect.y += dy
         if pygame.sprite.spritecollide(self, walls, False):
-            self.rect.y -= dy # Undo move
+            self.rect.y -= dy # Undo move if hit wall
 
-        # Screen boundaries
+        # Keep on screen
         self.rect.clamp_ip(pygame.Rect(0, 0, WIDTH, HEIGHT))
 
-        # Handle Speed Boost decay
+        # Boost Decay
         if self.boost_timer > 0:
             self.boost_timer -= 1
         else:
-            self.speed = self.original_speed
+            self.speed = self.base_speed
 
     def boost(self):
-        self.speed = self.original_speed * 1.5
-        self.boost_timer = 120 # 2 seconds at 60 FPS
+        self.speed = self.base_speed * 1.8
+        self.boost_timer = 180 # 3 seconds
 
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, speed_level):
+    def __init__(self, level):
         super().__init__()
-        self.image = load_asset("hod.png", RED, (45, 45))
+        self.image = load_asset("hod.png", RED, (35, 35))
         self.rect = self.image.get_rect()
-        # Spawn away from player
-        self.rect.topleft = (WIDTH - 60, HEIGHT - 60) 
-        self.speed = 2 + (speed_level * 0.2)
+        self.rect.topleft = (WIDTH - 50, HEIGHT - 50)
+        self.speed = 2.0 + (level * 0.3)
         
-    def update(self, player_rect):
-        # Simple chasing logic
+    def update(self, target_rect):
+        # Chase Logic
         dx, dy = 0, 0
-        if self.rect.x < player_rect.x: dx = self.speed
-        if self.rect.x > player_rect.x: dx = -self.speed
-        if self.rect.y < player_rect.y: dy = self.speed
-        if self.rect.y > player_rect.y: dy = -self.speed
+        if self.rect.x < target_rect.x: dx = self.speed
+        if self.rect.x > target_rect.x: dx = -self.speed
+        if self.rect.y < target_rect.y: dy = self.speed
+        if self.rect.y > target_rect.y: dy = -self.speed
         
         self.rect.x += dx
         self.rect.y += dy
 
-class Obstacle(pygame.sprite.Sprite):
+class Wall(pygame.sprite.Sprite):
     def __init__(self, x, y, w, h):
         super().__init__()
         self.image = pygame.Surface((w, h))
@@ -106,234 +105,178 @@ class Obstacle(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.topleft = (x, y)
 
-class Collectible(pygame.sprite.Sprite):
+class Note(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
-        self.image = load_asset("note.png", GREEN, (20, 20)) # Neon effect simulated by bright green
+        self.image = load_asset("note.png", GREEN, (15, 15))
         self.rect = self.image.get_rect()
         self.rect.topleft = (x, y)
 
 class Gate(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        self.image = pygame.Surface((60, 10))
+        self.image = pygame.Surface((80, 10))
         self.image.fill(GOLD)
         self.rect = self.image.get_rect()
-        self.rect.midtop = (WIDTH // 2, 0)
+        self.rect.midtop = (WIDTH // 2, 0) # Top center
 
-# --- GAME MANAGER ---
-
+# --- MAIN GAME ---
 async def main():
     pygame.init()
-    pygame.mixer.init() # Initialize sound
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Campus Run")
     clock = pygame.time.Clock()
-    font = pygame.font.Font(None, 36)
-    title_font = pygame.font.Font(None, 72)
+    font = pygame.font.SysFont("Arial", 24)
+    big_font = pygame.font.SysFont("Arial", 48)
 
-    # Game States
-    STATE_LOGIN = 0
-    STATE_PLAYING = 1
-    STATE_GAMEOVER = 2
-    STATE_LEVEL_COMPLETE = 3
+    # States
+    LOGIN, PLAY, GAME_OVER, WIN = 0, 1, 2, 3
+    state = LOGIN
     
-    current_state = STATE_LOGIN
-    
-    # Player Data
+    # Game Data
     player_name = ""
-    player_gender = "Male"
+    gender = "Male"
     level = 1
     score = 0
-    lives_lost_in_level = 0
+    lives_lost_level = 0
     
     # Groups
-    all_sprites = pygame.sprite.Group()
+    sprites = pygame.sprite.Group()
     walls = pygame.sprite.Group()
     notes = pygame.sprite.Group()
-    enemy_group = pygame.sprite.Group()
+    enemies = pygame.sprite.Group()
     
     player = None
     hod = None
     gate = Gate()
-    
-    # Sound Load (Try/Except to prevent crash if file missing)
-    try:
-        bell_sound = pygame.mixer.Sound("assets/school_bell.wav")
-    except:
-        bell_sound = None
 
-    def setup_level(lvl):
-        all_sprites.empty()
+    def start_level(lvl):
+        sprites.empty()
         walls.empty()
         notes.empty()
-        enemy_group.empty()
+        enemies.empty()
+        nonlocal player, hod, lives_lost_level
+        lives_lost_level = 0
         
-        nonlocal player, hod, lives_lost_in_level
-        lives_lost_in_level = 0
+        # Player
+        player = Player(gender, 50, HEIGHT - 100)
+        sprites.add(player)
         
-        # Spawn Player
-        player = Player(player_gender, 50, HEIGHT - 100)
-        all_sprites.add(player)
-        
-        # Spawn HOD
+        # Enemy
         hod = Enemy(lvl)
-        enemy_group.add(hod)
-        all_sprites.add(hod)
+        sprites.add(hod)
+        enemies.add(hod)
         
-        # Spawn Gate
-        all_sprites.add(gate)
+        # Gate
+        sprites.add(gate)
         
-        # Procedural Map Generation (Campus Classrooms)
-        # Create random obstacles/desks
-        num_obstacles = 10 + (lvl * 2)
-        for _ in range(num_obstacles):
-            w, h = random.randint(40, 100), random.randint(20, 60)
-            x = random.randint(100, WIDTH - 100)
-            y = random.randint(50, HEIGHT - 150)
-            wall = Obstacle(x, y, w, h)
+        # Random Walls (Classroom furniture)
+        for _ in range(10 + lvl):
+            w = random.randint(50, 150)
+            h = random.randint(20, 50)
+            x = random.randint(100, WIDTH - 150)
+            y = random.randint(50, HEIGHT - 100)
+            wall = Wall(x, y, w, h)
             walls.add(wall)
-            all_sprites.add(wall)
+            sprites.add(wall)
             
-        # Spawn Notes
+        # Notes (Powerups)
         for _ in range(5):
             nx = random.randint(50, WIDTH - 50)
             ny = random.randint(50, HEIGHT - 50)
-            note = Collectible(nx, ny)
+            note = Note(nx, ny)
             notes.add(note)
-            all_sprites.add(note)
+            sprites.add(note)
 
-    # --- MAIN LOOP ---
     running = True
     while running:
-        screen.fill((30, 30, 30)) # Dark floor background
-        
+        screen.fill(FLOOR)
         keys = pygame.key.get_pressed()
         
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
+            if event.type == pygame.QUIT: running = False
             
-            if current_state == STATE_LOGIN:
+            if state == LOGIN:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN and len(player_name) > 0:
-                        setup_level(level)
-                        current_state = STATE_PLAYING
+                        start_level(level)
+                        state = PLAY
                     elif event.key == pygame.K_BACKSPACE:
                         player_name = player_name[:-1]
-                    elif event.key == pygame.K_m:
-                        player_gender = "Male"
-                    elif event.key == pygame.K_f:
-                        player_gender = "Female"
-                    else:
-                        if len(player_name) < 10 and event.unicode.isalnum():
-                            player_name += event.unicode
-                            
-            elif current_state == STATE_GAMEOVER:
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_r:
-                        player.lives = 3
-                        level = 1
-                        score = 0
-                        current_state = STATE_LOGIN
-                        
-            elif current_state == STATE_LEVEL_COMPLETE:
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE:
-                         level += 1
-                         setup_level(level)
-                         current_state = STATE_PLAYING
-
-        # --- LOGIC UPDATES ---
-        
-        if current_state == STATE_LOGIN:
+                    elif event.key == pygame.K_m: gender = "Male"
+                    elif event.key == pygame.K_f: gender = "Female"
+                    elif event.unicode.isalnum(): player_name += event.unicode
             
+            elif state == GAME_OVER or state == WIN:
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+                    # Restart Game
+                    level = 1
+                    score = 0
+                    player.lives = 3
+                    state = LOGIN
+                
+                if state == WIN and event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                    # Next Level
+                    level += 1
+                    start_level(level)
+                    state = PLAY
 
-[Image of retro video game interface]
-
-            title_text = title_font.render("CAMPUS RUN", True, WHITE)
-            name_prompt = font.render(f"Name: {player_name}_", True, WHITE)
-            gender_prompt = font.render(f"Press M for Male, F for Female: {player_gender}", True, WHITE)
-            start_prompt = font.render("Press ENTER to Confirm", True, GREEN)
+        # --- LOGIC ---
+        if state == LOGIN:
+            t1 = big_font.render("CAMPUS RUN", True, WHITE)
+            t2 = font.render(f"Name: {player_name}_", True, WHITE)
+            t3 = font.render(f"Gender (M/F): {gender}", True, GREEN)
+            t4 = font.render("Press ENTER to Start", True, GOLD)
+            screen.blit(t1, (WIDTH//2 - 100, 100))
+            screen.blit(t2, (WIDTH//2 - 100, 250))
+            screen.blit(t3, (WIDTH//2 - 100, 300))
+            screen.blit(t4, (WIDTH//2 - 100, 400))
             
-            screen.blit(title_text, (WIDTH//2 - 150, 100))
-            screen.blit(name_prompt, (WIDTH//2 - 100, 250))
-            screen.blit(gender_prompt, (WIDTH//2 - 200, 300))
-            screen.blit(start_prompt, (WIDTH//2 - 130, 400))
-            
-            # Show selected sprite preview
-            if player_gender == "Male":
-                pygame.draw.rect(screen, BLUE, (WIDTH//2 - 20, 200, 40, 40))
-            else:
-                pygame.draw.rect(screen, PINK, (WIDTH//2 - 20, 200, 40, 40))
-
-        elif current_state == STATE_PLAYING:
-            
-
-[Image of pixel art school hallway]
-
+        elif state == PLAY:
             player.update(keys, walls)
             hod.update(player.rect)
             
-            # Note Collection (Speed Boost)
+            # Interactions
             if pygame.sprite.spritecollide(player, notes, True):
                 player.boost()
             
-            # HOD Collision (Lose Life)
-            if pygame.sprite.spritecollide(player, enemy_group, False):
+            if pygame.sprite.spritecollide(player, enemies, False):
                 player.lives -= 1
-                lives_lost_in_level += 1
-                # Shake effect logic (simplified as a red flash)
-                screen.fill(RED) 
-                
+                lives_lost_level += 1
+                player.rect.topleft = (50, HEIGHT - 100) # Reset Pos
+                hod.rect.topleft = (WIDTH - 50, HEIGHT - 50) # Reset HOD
+                screen.fill(RED) # Hit flash
                 if player.lives <= 0:
-                    current_state = STATE_GAMEOVER
-                else:
-                    # Reset positions but keep level progress
-                    player.rect.topleft = (50, HEIGHT - 100)
-                    hod.rect.topleft = (WIDTH - 60, HEIGHT - 60)
+                    state = GAME_OVER
             
-            # Gate Collision (Win Level)
             if pygame.sprite.collide_rect(player, gate):
-                if bell_sound: bell_sound.play()
-                
-                # Scoring Logic
-                level_score = 1000
-                if lives_lost_in_level == 1: level_score -= 500
-                elif lives_lost_in_level == 2: level_score -= 700
-                
-                score += level_score
-                current_state = STATE_LEVEL_COMPLETE
+                pts = 1000 - (lives_lost_level * 500)
+                if pts < 0: pts = 0
+                score += pts
+                state = WIN
 
-            # Draw
-            all_sprites.draw(screen)
+            sprites.draw(screen)
             
-            # UI
-            score_text = font.render(f"Score: {score} | Level: {level}", True, WHITE)
-            lives_text = font.render(f"Lives: {player.lives}", True, RED)
-            screen.blit(score_text, (10, 10))
-            screen.blit(lives_text, (WIDTH - 120, 10))
+            # HUD
+            hud = font.render(f"Score: {score} | Lvl: {level} | Lives: {player.lives}", True, WHITE)
+            screen.blit(hud, (10, 10))
 
-        elif current_state == STATE_LEVEL_COMPLETE:
-            win_text = title_font.render("LEVEL COMPLETE!", True, GOLD)
-            score_msg = font.render(f"Total Score: {score}", True, WHITE)
-            cont_msg = font.render("Press SPACE for Next Level", True, GREEN)
-            screen.blit(win_text, (WIDTH//2 - 200, 200))
-            screen.blit(score_msg, (WIDTH//2 - 100, 300))
-            screen.blit(cont_msg, (WIDTH//2 - 150, 400))
+        elif state == GAME_OVER:
+            t1 = big_font.render("GAME OVER", True, RED)
+            t2 = font.render(f"Final Score: {score}", True, WHITE)
+            t3 = font.render("Press R to Restart", True, WHITE)
+            screen.blit(t1, (WIDTH//2 - 120, 200))
+            screen.blit(t2, (WIDTH//2 - 80, 300))
+            screen.blit(t3, (WIDTH//2 - 80, 350))
 
-        elif current_state == STATE_GAMEOVER:
-            over_text = title_font.render("GAME OVER", True, RED)
-            score_msg = font.render(f"Final Score: {score}", True, WHITE)
-            retry_msg = font.render("Press R to Restart", True, WHITE)
-            screen.blit(over_text, (WIDTH//2 - 150, 200))
-            screen.blit(score_msg, (WIDTH//2 - 100, 300))
-            screen.blit(retry_msg, (WIDTH//2 - 100, 400))
+        elif state == WIN:
+            t1 = big_font.render("LEVEL COMPLETE", True, GOLD)
+            t2 = font.render("Press SPACE for Next Level", True, WHITE)
+            screen.blit(t1, (WIDTH//2 - 150, 200))
+            screen.blit(t2, (WIDTH//2 - 120, 300))
 
         pygame.display.flip()
-        
-        # Crucial for Web Assembly loop
-        await asyncio.sleep(0)
+        await asyncio.sleep(0) # Required for Web
 
 if __name__ == "__main__":
     asyncio.run(main())
