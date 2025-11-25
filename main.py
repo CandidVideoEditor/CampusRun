@@ -1,17 +1,18 @@
 import asyncio
 import pygame
 import random
+import math
 
 # --- CONFIGURATION ---
 WIDTH, HEIGHT = 800, 600
 FPS = 60
 
-# --- GIANT MAZE SETTINGS ---
+# --- GIANT MAZE SETTINGS (100x100) ---
 TILE_SIZE = 40          
 COLS = 100              
 ROWS = 100              
 
-# COLORS
+# --- COLORS ---
 FLOOR_COLOR = (230, 140, 60)   
 WALL_TOP = (30, 80, 220)       
 WALL_SIDE = (20, 50, 150)      
@@ -31,7 +32,7 @@ def load_image(filename, fallback_color, size):
         surf.fill(fallback_color)
         return surf
 
-# --- MAZE GENERATOR ---
+# --- MAZE GENERATOR (Recursive Backtracker) ---
 def generate_maze_grid(cols, rows):
     grid = [[1 for _ in range(cols)] for _ in range(rows)]
     start_x, start_y = 1, 1
@@ -68,9 +69,6 @@ class Camera:
     def apply(self, entity):
         return entity.rect.move(self.camera.topleft)
 
-    def apply_rect(self, rect):
-        return rect.move(self.camera.topleft)
-
     def update(self, target):
         x = -target.rect.centerx + int(WIDTH / 2)
         y = -target.rect.centery + int(HEIGHT / 2)
@@ -104,13 +102,13 @@ class TouchButton:
 
 # --- CLASSES ---
 class Player(pygame.sprite.Sprite):
-    def __init__(self, name, gender, x, y):
+    def __init__(self, name, gender, x, y, current_level):
         super().__init__()
-        self.base_speed = 5 
+        # INTEGRATED LOGIC: Speed increases with Level
+        self.base_speed = 5 + (current_level * 0.1) 
         self.speed = self.base_speed
         self.name = name
         
-        # Load Sprite
         if gender == 'Male': self.image_original = load_image("boy.png", (0,0,255), (30, 30))
         else: self.image_original = load_image("girl.png", (255,100,100), (30, 30))
         self.image = self.image_original.copy()
@@ -121,14 +119,12 @@ class Player(pygame.sprite.Sprite):
         self.boost_timer = 0
         self.visible = True
 
-        # --- CREATE NAME TAG ---
-        # Small font, Bold for visibility
+        # Name Tag
         font = pygame.font.SysFont("Arial", 14, bold=True)
         text_surf = font.render(name, True, WHITE)
-        # Create a small black box behind text for readability
         self.name_tag = pygame.Surface((text_surf.get_width() + 6, text_surf.get_height() + 4))
         self.name_tag.fill((0, 0, 0))
-        self.name_tag.set_alpha(180) # Semi-transparent
+        self.name_tag.set_alpha(150)
         self.name_tag.blit(text_surf, (3, 2))
         
     def update(self, keys, walls, touch_inputs):
@@ -156,7 +152,7 @@ class Player(pygame.sprite.Sprite):
         else: self.speed = self.base_speed
 
     def boost(self):
-        self.speed = 8
+        self.speed = 9
         self.boost_timer = 180 
         
     def toggle_visibility(self):
@@ -166,11 +162,15 @@ class Player(pygame.sprite.Sprite):
         self.image.set_alpha(255); self.visible = True
 
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self):
+    def __init__(self, current_level):
         super().__init__()
         self.image = load_image("hod.png", RED, (32, 32))
         self.rect = self.image.get_rect()
-        self.speed = 3.5 
+        
+        # INTEGRATED LOGIC: Enemy Speed Scaling
+        self.speed = 3.0 + (current_level * 0.08)
+        # Ensure enemy is never faster than player base speed
+        if self.speed >= 4.8: self.speed = 4.8
         
     def update(self, player_rect, walls):
         dx, dy = 0, 0
@@ -187,6 +187,7 @@ class Enemy(pygame.sprite.Sprite):
 class Wall(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
+        # 3D Wall Effect
         self.image = pygame.Surface((TILE_SIZE, TILE_SIZE))
         self.image.fill(WALL_SIDE)
         top_rect = pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE - 10)
@@ -215,7 +216,7 @@ class Gate(pygame.sprite.Sprite):
 async def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Campus Run: 100x100")
+    pygame.display.set_caption("Campus Maze: Web Edition")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("Arial", 24)
     big_font = pygame.font.SysFont("Arial", 48)
@@ -233,7 +234,7 @@ async def main():
     level = 1
     score = 0
     gender = "Male"
-    player_name = "" # New Variable for Name
+    player_name = "" 
     hit_timer = 0 
     
     camera = Camera(COLS * TILE_SIZE, ROWS * TILE_SIZE)
@@ -252,6 +253,7 @@ async def main():
     def build_level(lvl):
         sprites.empty(); walls.empty(); notes.empty(); enemy_grp.empty()
         
+        # GENERATE MAZE (Recursive Backtracker)
         maze_data = generate_maze_grid(COLS, ROWS)
         spawn_points = []
         
@@ -269,8 +271,8 @@ async def main():
         nonlocal player, hod, gate, start_pos, hod_start_pos
         
         start_pos = spawn_points[0]
-        # Pass player_name to the class here
-        player = Player(player_name if player_name else "Player", gender, start_pos[0] + 6, start_pos[1] + 6)
+        # PASS LEVEL to Player for Speed Scaling
+        player = Player(player_name if player_name else "Player", gender, start_pos[0] + 6, start_pos[1] + 6, lvl)
         sprites.add(player)
         
         end_pos = spawn_points[-1]
@@ -278,7 +280,8 @@ async def main():
         sprites.add(gate)
         
         hod_start_pos = spawn_points[len(spawn_points)//2]
-        hod = Enemy()
+        # PASS LEVEL to Enemy for Speed Scaling
+        hod = Enemy(lvl)
         hod.rect.topleft = hod_start_pos
         enemy_grp.add(hod)
         sprites.add(hod)
@@ -305,17 +308,14 @@ async def main():
                         build_level(level); state = "PLAY"
                     elif event.key == pygame.K_BACKSPACE:
                         player_name = player_name[:-1]
-                    elif event.key == pygame.K_m: gender = "Male" # Shortcut
-                    elif event.key == pygame.K_f: gender = "Female" # Shortcut
+                    elif event.key == pygame.K_m: gender = "Male" 
+                    elif event.key == pygame.K_f: gender = "Female" 
                     else:
-                        # Add typed character to name (limit to 10 chars)
                         if len(player_name) < 10 and event.unicode.isalnum():
                             player_name += event.unicode
 
-                # Touch Gender Switch
                 if event.type == pygame.MOUSEBUTTONDOWN and pygame.mouse.get_pos()[1] < 350:
                      gender = "Female" if gender == "Male" else "Male"
-                # Touch Start
                 if event.type == pygame.MOUSEBUTTONDOWN and pygame.mouse.get_pos()[1] > 350:
                      build_level(level); state = "PLAY"
 
@@ -323,17 +323,12 @@ async def main():
                 if (event.type == pygame.KEYDOWN and event.key == pygame.K_r) or event.type == pygame.MOUSEBUTTONDOWN:
                     level = 1; score = 0; state = "LOGIN"
 
-        # --- DRAWING ---
         if state == "LOGIN":
             title = big_font.render("CAMPUS MAZE", True, WHITE)
+            name_box = font.render(f"Name: {player_name}_", True, GOLD)
+            gender_txt = font.render(f"Char: {gender} (Tap Switch)", True, WALL_TOP)
+            start = font.render("Tap HERE to Start", True, WHITE)
             
-            # Name Input Display
-            name_box = font.render(f"Type Name: {player_name}_", True, GOLD)
-            
-            gender_txt = font.render(f"Character: {gender} (Tap to Switch)", True, WALL_TOP)
-            start = font.render("Tap HERE or Press ENTER to Start", True, WHITE)
-            
-            # Background Box
             pygame.draw.rect(screen, WALL_SIDE, (WIDTH//2 - 220, 150, 440, 320))
             pygame.draw.rect(screen, WALL_TOP, (WIDTH//2 - 220, 150, 440, 320), 5)
             
@@ -354,19 +349,16 @@ async def main():
                 player.lives -= 1
                 state = "HIT"; hit_timer = 60
             if pygame.sprite.collide_rect(player, gate):
-                level += 1; score += 500; build_level(level)
+                # INTEGRATED LOGIC: Score +1000
+                level += 1; score += 1000; build_level(level)
 
-            # Draw World + Name Tag
             for sprite in sprites:
                 offset_rect = camera.apply(sprite)
                 if screen.get_rect().colliderect(offset_rect):
                     screen.blit(sprite.image, offset_rect)
-                    
-                    # Draw Name Tag ONLY for Player
                     if sprite == player and player.visible:
-                        # Position tag above player
                         tag_x = offset_rect.centerx - player.name_tag.get_width() // 2
-                        tag_y = offset_rect.top - 20 # 20px above head
+                        tag_y = offset_rect.top - 20
                         screen.blit(player.name_tag, (tag_x, tag_y))
             
             for btn in buttons: btn.draw(screen)
@@ -376,12 +368,10 @@ async def main():
         elif state == "HIT":
             hit_timer -= 1
             if hit_timer % 10 == 0: player.toggle_visibility()
-            
             for sprite in sprites:
                 offset_rect = camera.apply(sprite)
                 if screen.get_rect().colliderect(offset_rect):
                     screen.blit(sprite.image, offset_rect)
-                    # Draw Name Tag even when frozen
                     if sprite == player and player.visible:
                         tag_x = offset_rect.centerx - player.name_tag.get_width() // 2
                         tag_y = offset_rect.top - 20
@@ -394,7 +384,6 @@ async def main():
                     player.rect.topleft = (start_pos[0]+6, start_pos[1]+6)
                     hod.rect.topleft = hod_start_pos
                     state = "PLAY"
-            
             hud = font.render(f"Score: {score} | Lvl: {level} | Lives: {player.lives}", True, WHITE)
             screen.blit(hud, (20, 5))
 
